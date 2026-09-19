@@ -2,7 +2,7 @@
 
 ## Leakage-Controlled Multimodal Forecasting of ICU Physiological Deterioration
 
-> **A note on math in this file.** GitHub's Markdown renderer supports LaTeX math written as `$...$` (inline) and `$$...$$` (display, each on its own line, with no blank line inside the block). It does **not** render the `\( ... \)` / `\[ ... \]` delimiter style — those show up as literal backslash-parenthesis text. Every equation below uses the `$` / `$$` form for this reason.
+<!-- > **A note on math in this file.** GitHub's Markdown renderer supports LaTeX math written as `$...$` (inline) and `$$...$$` (display, each on its own line, with no blank line inside the block). It does **not** render the `\( ... \)` / `\[ ... \]` delimiter style — those show up as literal backslash-parenthesis text. Every equation below uses the `$` / `$$` form for this reason. -->
 
 ---
 
