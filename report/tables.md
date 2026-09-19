@@ -44,28 +44,32 @@ All required tables were present, readable, schema-compatible, and matched the o
 | Severe hypotension | 116 | 545 | 1,093 | Retained as candidate |
 | Severe hypoxemia | 130 | 607 | 1,192 | Retained as candidate |
 
-**Locked endpoint:**
+<!-- **Locked endpoint:**
 
-<!-- 
 $$
 T_{\text{collapse}} = \min\left\{ T_{\text{hypotension}},\ T_{\text{hypoxemia}},\ T_{\text{ICU death}} \right\}
-$$ 
--->
+$$
+
+where $T_{\text{hypotension}}$ is the first sustained episode with $\text{MAP} < 55$ mmHg for $\ge 30$ minutes, and $T_{\text{hypoxemia}}$ is the first sustained episode with $\text{SpO}_2 < 88\%$ for $\ge 30$ minutes. -->
+
+**Locked endpoint:**
+
+The composite collapse time is defined as
 
 $$
 T_{\text{collapse}}
 =
-\min\left\{
+\min\left(
 T_{\text{hypotension}},
 T_{\text{hypoxemia}},
 T_{\text{ICU death}}
-\right\}
+\right).
 $$
 
-where \(T_{\text{hypotension}}\) is the first sustained episode with
-\(\mathrm{MAP} < 55\,\mathrm{mmHg}\) for \(\geq 30\) minutes, and
+Here, \(T_{\text{hypotension}}\) is the first sustained episode with
+\(\mathrm{MAP} < 55\,\mathrm{mmHg}\) lasting at least \(30\) minutes, while
 \(T_{\text{hypoxemia}}\) is the first sustained episode with
-\(\mathrm{SpO}_2 < 88\%\) for \(\geq 30\) minutes.
+\(\mathrm{SpO}_2 < 88\%\) lasting at least \(30\) minutes.
 
 ---
 
