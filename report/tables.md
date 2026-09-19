@@ -61,6 +61,7 @@ T_{\text{hypotension}},
 T_{\text{hypoxemia}},
 T_{\text{ICU death}}
 \right)
+```
 
 where $T_{\text{hypotension}}$ is the first sustained episode with $\mathrm{MAP} < 55,\mathrm{mmHg}$ lasting at least $30$ minutes, while $T_{\text{hypoxemia}}$ is the first sustained episode with $\mathrm{SpO}_2 < 88%$ lasting at least $30$ minutes.
 
