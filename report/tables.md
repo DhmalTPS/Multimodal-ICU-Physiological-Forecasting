@@ -1,6 +1,6 @@
 # Report Tables
 
-> Math in this file uses GitHub's native `$...$` (inline) / `$$...$$` (display) syntax. Every table cell that needs a symbol uses `$...$`, never `\( ... \)`, since GitHub does not render the latter.
+<!-- > Math in this file uses GitHub's native `$...$` (inline) / `$$...$$` (display) syntax. Every table cell that needs a symbol uses `$...$`, never `\( ... \)`, since GitHub does not render the latter. -->
 
 ## Table 1 — Raw Data Audit
 
@@ -46,11 +46,26 @@ All required tables were present, readable, schema-compatible, and matched the o
 
 **Locked endpoint:**
 
+<!-- 
 $$
 T_{\text{collapse}} = \min\left\{ T_{\text{hypotension}},\ T_{\text{hypoxemia}},\ T_{\text{ICU death}} \right\}
+$$ 
+-->
+
+$$
+T_{\text{collapse}}
+=
+\min\left\{
+T_{\text{hypotension}},
+T_{\text{hypoxemia}},
+T_{\text{ICU death}}
+\right\}
 $$
 
-where $T_{\text{hypotension}}$ is the first sustained episode with $\text{MAP} < 55$ mmHg for $\ge 30$ minutes, and $T_{\text{hypoxemia}}$ is the first sustained episode with $\text{SpO}_2 < 88\%$ for $\ge 30$ minutes.
+where \(T_{\text{hypotension}}\) is the first sustained episode with
+\(\mathrm{MAP} < 55\,\mathrm{mmHg}\) for \(\geq 30\) minutes, and
+\(T_{\text{hypoxemia}}\) is the first sustained episode with
+\(\mathrm{SpO}_2 < 88\%\) for \(\geq 30\) minutes.
 
 ---
 
