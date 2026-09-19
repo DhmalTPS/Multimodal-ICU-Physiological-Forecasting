@@ -2,7 +2,7 @@
 
 ## Leakage-Controlled Multimodal Forecasting of Physiological Deterioration from Asynchronous ICU Data
 
-> Math in this document uses GitHub's native Markdown math syntax: `$...$` for inline expressions and `$$...$$` for display equations, each on its own line with no blank line inside the block. See `README.md` for the full reproducibility guide and `tables.md` for every result table referenced below.
+<!-- > Math in this document uses GitHub's native Markdown math syntax: `$...$` for inline expressions and `$$...$$` for display equations, each on its own line with no blank line inside the block. See `README.md` for the full reproducibility guide and `tables.md` for every result table referenced below. -->
 
 ---
 
@@ -59,8 +59,18 @@ The principal contribution is therefore methodological: a complete forecasting p
 
 Let an ICU stay be indexed by $i$. The underlying patient state evolves continuously in time, $S_i(t) \in \mathcal S$, but is never observed directly. Instead, three asynchronous measurement processes generate observations — physiology, laboratory results, and clinical text — together with a static, time-invariant vector:
 
-$$
+<!-- $$
 \mathcal X_i = \left\{ X_i^{(p)}(t),\ X_i^{(l)}(t),\ X_i^{(n)}(t),\ X_i^{(s)} \right\}.
+$$ -->
+
+$$
+\mathcal{X}_i =
+\left\lbrace
+X_i^{(p)}(t),
+X_i^{(l)}(t),
+X_i^{(n)}(t),
+X_i^{(s)}
+\right\rbrace.
 $$
 
 The central forecasting quantity is the conditional onset probability
