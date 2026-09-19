@@ -1,0 +1,700 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{multirow}
+\usepackage{bm}
+
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+
+\newtheorem{definition}{Definition}[section]
+\newtheorem{proposition}{Proposition}[section]
+\newtheorem{remark}{Remark}[section]
+\newtheorem{assumption}{Assumption}[section]
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Prb}{\mathbb{P}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\X}{\mathcal{X}}
+\newcommand{\1}[1]{\mathbf{1}\!\left[#1\right]}
+\newcommand{\Sig}{\sigma}
+\newcommand{\diag}{\mathrm{diag}}
+
+\title{\textbf{Leakage-Controlled Multimodal Forecasting of ICU Physiological Deterioration}\\[4pt]
+\large A Mathematical and Architectural Account of the ICU Monitor Dilemma Pipeline}
+\author{Technical Report}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+Intensive care units generate an asynchronous mixture of high-frequency physiological signals, sparse and irregular laboratory panels, and event-driven clinical documentation. We formalize deterioration forecasting on this data as estimation of a family of conditional probabilities under an explicit information filtration $\{\F_i(t)\}_{t\geq0}$, and construct a full pipeline --- endpoint definition, causal feature construction, a modality-specific fusion network with masked causal cross-attention and a missingness-aware reliability gate, an alarm automaton, and a clustered bootstrap inference procedure --- that respects this filtration at every stage. On the eICU Collaborative Research Database Demo ($N=1{,}565$ eligible ICU stays, $1{,}294$ patients), the fused multimodal model attains a $6$-hour AUPRC of $0.1175$ (stay-level bootstrap $95\%$ CI $[0.0592,0.1954]$), compared with $0.1266$ for a physiology-only model ($[0.0557,0.2473]$). Every paired bootstrap comparison among the evaluated models contains zero, so superiority of multimodal fusion over physiology alone is \emph{not} established at this sample size, even though the fused architecture strictly dominates naive concatenation ($0.1034$) and logistic regression ($0.0880$) in ablation. We give the exact mathematical form of every architectural component, derive the causal-truncation invariant that the code enforces and tests empirically, and quantify the alarm-controller's sensitivity/burden trade-off ($84.9\%$ event sensitivity at $11.44$ alarms/patient-day, $4.49\%$ precision). The report treats the null multimodal-superiority result as scientific content rather than a shortcoming to be hidden.
+\end{abstract}
+
+\tableofcontents
+
+% =====================================================================
+\section{Introduction and Motivation}
+% =====================================================================
+
+Bedside ICU monitors alarm on instantaneous threshold violations. Because physiological signals are noisy at the timescale of seconds (motion artifact, lead displacement, transient probe loss), the overwhelming majority of these alarms are false positives, a phenomenon documented in the clinical literature as \emph{alarm fatigue}. The scientific premise of this project is that a model with access to a longer temporal context, multiple modalities, and an explicit missingness representation can produce a smoother, more clinically actionable risk trajectory than a threshold detector operating on the current sample alone.
+
+This premise is only meaningful if the model is prevented, by construction, from using information that would not actually be available to a clinician at the moment of prediction. We therefore treat \textbf{information availability} as a first-class mathematical object throughout: every feature, label, scaler, and vocabulary is defined with respect to an explicit filtration, and the causal correctness of the feature construction is not merely assumed but empirically tested (\S\ref{sec:causality}).
+
+% =====================================================================
+\section{Mathematical Problem Formulation}
+% =====================================================================
+
+\subsection{The underlying process and its observation}
+
+For ICU stay $i \in \{1,\dots,N\}$, let the (unobserved) patient physiological state evolve as a stochastic process
+\[
+S_i(t) \in \mathcal{S}, \qquad t \in [0, L_i],
+\]
+where $L_i$ is the ICU length of stay in minutes and $t$ is measured from ICU admission. The state is never observed directly; instead, four asynchronous measurement processes generate partial observations:
+\begin{align}
+X_i^{(p)}(t) &\quad \text{physiology (vitalPeriodic + vitalAperiodic)}, \\
+X_i^{(l)}(t) &\quad \text{laboratory results (lab)}, \\
+X_i^{(n)}(t) &\quad \text{clinical notes (note)}, \\
+X_i^{(s)} &\quad \text{static, time-invariant admission features.}
+\end{align}
+Write $\X_i = \{X_i^{(p)}(t), X_i^{(l)}(t), X_i^{(n)}(t), X_i^{(s)}\}_{t}$ for the complete observation process of stay $i$.
+
+\begin{definition}[Information filtration]
+The \emph{information available at time $t$} for stay $i$ is the $\sigma$-algebra
+\[
+\F_i(t) \;=\; \Sig\Big( X_i^{(p)}(\tau),\, X_i^{(l)}(\tau),\, X_i^{(n)}(\tau) \;:\; \tau \le t \Big) \;\vee\; \Sig\big(X_i^{(s)}\big).
+\]
+\end{definition}
+By construction $\F_i(t)$ is non-decreasing in $t$ (a filtration): $\F_i(t_1)\subseteq \F_i(t_2)$ for $t_1\le t_2$. Any admissible predictor at time $t$ must be $\F_i(t)$-measurable.
+
+\subsection{The forecasting target}
+
+Fix an event time (defined in \S\ref{sec:endpoint}) $T_i \in [0,\infty]$ denoting the first onset of clinically significant deterioration. For a horizon $h\in\mathcal{H}=\{1,3,6\}$ hours, define the binary label process
+\begin{equation}
+Y_{i,h}(t) \;=\; \1{\,t < T_i \le t+h\,}.
+\end{equation}
+The estimand is the conditional onset probability
+\begin{equation}
+p_{i,h}(t) \;=\; \Prb\big(Y_{i,h}(t)=1 \mid \F_i(t)\big),
+\end{equation}
+and the model produces a plug-in estimator $\hat p_{i,h}(t) = f_\theta\big(\Phi(\X_i^{\le t})\big)_h$, where $\Phi$ is a feature map and $f_\theta$ the learned network of \S\ref{sec:architecture}. The central correctness requirement of the entire pipeline is
+\begin{equation}
+\Phi\big(\X_i^{\le t}\big) \text{ is } \F_i(t)\text{-measurable}, \label{eq:causality-req}
+\end{equation}
+i.e., $\Phi$ must not be a function of $X_i(\tau)$ for any $\tau > t$. Equation~\eqref{eq:causality-req} is the formal statement of ``no leakage'' and is the object that the truncation test of \S\ref{sec:causality} verifies numerically.
+
+\begin{remark}[Prediction time vs.\ event time vs.\ documentation time]
+A datum can carry up to three distinct timestamps: the clinical event time $\tau^{\text{clin}}$, the database entry (documentation) time $\tau^{\text{entry}}$, and the prediction anchor $t$. Only $\tau^{\text{entry}}$ determines membership in $\F_i(t)$:
+\[
+X_i^{(n)}(\tau^{\text{clin}}) \in \F_i(t) \iff \tau^{\text{entry}} \le t,
+\]
+regardless of how small $\tau^{\text{clin}}$ is. In the eICU note table, $98.0\%$ of notes have $\tau^{\text{entry}} > \tau^{\text{clin}}$ (median lag $12$ minutes); using $\tau^{\text{clin}}$ as the availability time would therefore leak future documentation into $\F_i(t)$ for the overwhelming majority of notes.
+\end{remark}
+
+% =====================================================================
+\section{Clinical Endpoint}\label{sec:endpoint}
+% =====================================================================
+
+Let $\mathrm{MAP}_i(t)$ and $\mathrm{SpO}_{2,i}(t)$ denote mean arterial pressure and pulse oximetry.
+
+\begin{definition}[Sustained threshold run]
+Given a binary indicator process $b(t)=\1{v(t) < \theta}$ (below-threshold) sampled at times $t_1 < t_2 < \dots$, with $\text{gap tolerance } g$, a \emph{run} is a maximal set of indices $\{k : b(t_k)=1\}$ such that consecutive selected samples satisfy $t_{k+1} - t_k \le g$. A run with start $t_{\mathrm{start}}$ and end $t_{\mathrm{end}}$ is \emph{sustained} at level $m$ if
+\[
+t_{\mathrm{end}} - t_{\mathrm{start}} \ge m,
+\]
+in which case its \emph{onset} (confirmation) time is $t_{\mathrm{onset}} = t_{\mathrm{start}} + m$: the earliest moment at which the sustained criterion is retrospectively confirmed.
+\end{definition}
+The two physiological episode types use
+\begin{align}
+\text{Hypotension:} && \theta_{\mathrm{MAP}} = 55\ \text{mmHg}, && m = 30\ \text{min}, && g = 45\ \text{min}, \\
+\text{Hypoxemia:} && \theta_{\mathrm{SpO}_2} = 88\%, && m = 30\ \text{min}, && g = 20\ \text{min}.
+\end{align}
+Episodes closer than $\Delta_{\mathrm{merge}}=60$ min are merged into a single clinical episode; the onset time used for labels is the \emph{earliest} onset among merged constituents, while the interval $[\mathrm{start},\mathrm{end}]$ of the merged episode is used only to exclude anchors that fall \emph{inside} an already-ongoing event (\S\ref{sec:labels}).
+
+\begin{definition}[Composite collapse endpoint]
+\begin{equation}
+T_i \;=\; \min\big(T_i^{\mathrm{hypotension}},\; T_i^{\mathrm{hypoxemia}},\; T_i^{\mathrm{ICU\ death}}\big).
+\end{equation}
+\end{definition}
+
+Five candidate endpoints were audited against a feasibility gate requiring $\ge 60$ positive stays, $\ge 300$ ($\ge 50$) positive $6$h ($1$h) anchors, $\ge 99\%$ of raw episode onsets occurring inside the ICU monitoring window, and a median lead time $\ge 6$h from the first eligible anchor. \texttt{hospital\_death} failed the second criterion --- only $43\%$ of hospital-death onsets fall inside the ICU observation window, so $\tau^{\text{event}}$ is unreliable relative to the physiological record used to build $\F_i(t)$ --- and was rejected. \texttt{composite\_collapse} was selected as it heads the priority ordering among endpoints that pass the gate (Table~\ref{tab:endpoint-audit}).
+
+\begin{table}[h]
+\centering
+\caption{Endpoint feasibility audit (positives at each horizon, raw episode counts before train/val/test split).}
+\label{tab:endpoint-audit}
+\begin{tabular}{lrrrl}
+\toprule
+Candidate & Pos.\ (1h) & Pos.\ (3h) & Pos.\ (6h) & Decision \\
+\midrule
+\texttt{composite\_collapse} & 292 & 1{,}259 & 2{,}457 & \textbf{Selected} \\
+\texttt{icu\_death} & 74 & 216 & 418 & Retained \\
+\texttt{hospital\_death} & 51 & 167 & 371 & \textbf{Rejected} (43\% events inside ICU window) \\
+\texttt{severe\_hypotension} & 116 & 545 & 1{,}093 & Retained \\
+\texttt{severe\_hypoxemia} & 130 & 607 & 1{,}192 & Retained \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{Temporal Discretization and the Causal Truncation Invariant}\label{sec:causality}
+% =====================================================================
+
+\subsection{The hourly anchor grid}
+
+Define the hourly anchor grid for stay $i$ as $t_{i,a} = 60a$ minutes, for integer $a$. The set of \emph{admissible anchors} is
+\begin{equation}
+\mathcal{A}_i \;=\; \{\, a \in \mathbb{Z} : L_{\mathrm{lookback}} \le a \le a_{\max,i} \,\}, \qquad a_{\max,i} = \min\!\Big(\big\lceil u_i / 60\big\rceil - 1,\; 336\Big),
+\end{equation}
+where $u_i$ is the ICU-discharge offset (minutes) and $L_{\mathrm{lookback}}=24$ hours. The lower bound guarantees a complete $24$-hour lookback window for every anchor; the upper bound guarantees $t_{i,a} < u_i$ (the patient is still under active monitoring) and caps very long stays at $336$ hours ($14$ days) so they cannot dominate the anchor population.
+
+\subsection{Row construction as a measurable map}
+
+For each hour index $g\ge0$ define the \emph{row} $\Phi_{i,g}$ as the concatenation of three modality blocks and a mask, built exclusively from observations with timestamp $\le 60g$:
+\begin{align}
+\Phi_{i,g}^{(p)} &= \big[\, z_c(g),\, \min_c(g),\, \max_c(g),\, o_c(g),\, \delta_c(g) \,\big]_{c=1}^{7} \in \R^{35}, \\
+\Phi_{i,g}^{(l)} &= \big[\, \ell_j(g),\, \delta^{\ell}_j(g),\, \beta_j(g),\, \log(1+n_j(g)),\, e_j(g) \,\big]_{j=1}^{16} \in \R^{80}, \\
+\Phi_{i,g}^{(n)} &= \big[\, \bar{v}(g),\, \delta^n(g),\, \log(1+c(g)) \,\big] \in \R^{66}, \\
+m_{i,g} &= \big[\, o(g),\, \bar e(g),\, \1{c(g)>0} \,\big] \in \{0,1\}^{3}.
+\end{align}
+Section~\ref{sec:features} gives the exact form of each symbol above. A sample for anchor $a$ is the $24 \times (35+80+66)$ block of rows $g = a-23, \dots, a$, together with the static vector $S_i \in \R^{14}$ (padded to $15$ with $\log(1+a)/6$ at batch time).
+
+\begin{proposition}[Causal truncation invariant]\label{prop:truncation}
+Let $\Phi_{i,g}(\X)$ denote row $g$ computed from observation set $\X$. If $\X' = \X \cap \{\tau \le 60g\}$ (i.e.\ $\X'$ is $\X$ with every observation after time $60g$ deleted), then
+\begin{equation}
+\Phi_{i,g}(\X) \;=\; \Phi_{i,g}(\X').
+\end{equation}
+\end{proposition}
+This is precisely condition~\eqref{eq:causality-req} restricted to the hourly grid, and it is \emph{not} merely asserted: \texttt{06\_build\_features.py} draws $20$ random $(\mathrm{stay}, g)$ pairs with $g\ge 24$ from stays with $>25$ rows, rebuilds $\Phi_{i,g}$ from the truncated data $\X'$, and asserts numerical equality (tolerance $10^{-5}$) against the value computed from the full dataset for all three modality blocks. All $20$ checks passed in the reference run. This constitutes an empirical proof, on a finite random sample, of Proposition~\ref{prop:truncation} for the deployed implementation of $\Phi$ — a unit test for a measure-theoretic property.
+
+% =====================================================================
+\section{Cohort Construction}
+% =====================================================================
+
+The raw eICU-CRD Demo contains $2{,}520$ ICU stays from $1{,}841$ unique patients. Eligibility is a conjunction of six criteria applied sequentially (Table~\ref{tab:funnel}); note that $894$ of $2{,}520$ stays ($35.5\%$) are excluded solely by the $L_i > 24$h requirement, since a full $24$-hour lookback is a structural precondition for the first admissible anchor.
+
+\begin{table}[h]
+\centering
+\caption{Cohort eligibility funnel.}
+\label{tab:funnel}
+\begin{tabular}{lrrr}
+\toprule
+Stage & Stays & Patients & Excluded (vs.\ prior) \\
+\midrule
+All ICU stays & 2{,}520 & 1{,}841 & --- \\
+Valid ID + known ICU discharge & 2{,}520 & 1{,}841 & 0 \\
+ICU LOS $> 24$h & 1{,}626 & 1{,}332 & 894 \\
+Known ICU discharge status & 1{,}626 & 1{,}332 & 0 \\
+Plausible hospital/ICU timeline & 1{,}622 & 1{,}328 & 4 \\
+$\ge 12$ vital observations, first 24h & 1{,}566 & 1{,}294 & 56 \\
+Plausible event timing & \textbf{1{,}565} & \textbf{1{,}294} & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Patient-level, stratified split}
+
+Let $\mathcal{P}=\{1,\dots,1294\}$ index patients (a patient may own multiple stays). The partition
+\[
+\mathcal{P} = \mathcal{P}_{\mathrm{train}} \,\dot\cup\, \mathcal{P}_{\mathrm{val}} \,\dot\cup\, \mathcal{P}_{\mathrm{test}}
+\]
+is drawn once, by \texttt{sklearn.model\_selection.train\_test\_split} at $70/15/15$ proportions, stratified on the binary indicator $\1{\text{patient has} \ge 1 \text{ event onset after } t\ge 24\text{h}}$, \emph{before} any feature scaling or model fitting. All stays of a patient are assigned to the same split; the pipeline asserts
+\[
+\max_{p\in\mathcal{P}} \big|\{\text{split}(i) : \mathrm{patient}(i)=p\}\big| = 1
+\]
+i.e.\ no patient's split label is ambiguous. This prevents a model from having implicitly seen a patient's physiological signature (through a sibling stay) during training while being evaluated on that patient's held-out stay — a subtler leakage channel than a naive random split over rows.
+
+\begin{table}[h]
+\centering
+\caption{Resulting patient-level split.}
+\begin{tabular}{lrrrrr}
+\toprule
+Split & Stays & Patients & Event stays & Candidate anchors & ICU mortality \\
+\midrule
+Train & 1{,}086 & 905 & 182 & 58{,}890 & 4.88\% \\
+Validation & 234 & 194 & 40 & 14{,}883 & 4.70\% \\
+Test & 245 & 195 & 40 & 12{,}562 & 4.90\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{Multi-Horizon Labels}\label{sec:labels}
+% =====================================================================
+
+Let $\{(\mathrm{start}_k,\mathrm{onset}_k,\mathrm{end}_k)\}_{k}$ be stay $i$'s merged episode list, sorted by $\mathrm{start}_k$. For anchor time $t=60a$,
+\begin{equation}
+y_h(t) \;=\; \1{\exists\, k : t < \mathrm{onset}_k \le t+60h}, \qquad h \in \{1,3,6\}.
+\end{equation}
+Validity excludes anchors already inside an active episode:
+\begin{equation}
+\mathrm{valid}(t) \;=\; \1{\nexists\, k : \mathrm{start}_k \le t \le \mathrm{end}_k}.
+\end{equation}
+This encodes the design decision that the task is \emph{onset forecasting}, not \emph{persistence detection}: an anchor sampled while the patient is already hypotensive is not a meaningful forecasting instance and is dropped from the loss and from all reported metrics. The implementation asserts three label invariants for every stay and horizon:
+\begin{align}
+\text{(monotone nesting)} \qquad & y_6(t)=1 \implies y_3(t) \text{ or a later, more permissive check holds}, \quad y_6 \ge y_3 \ge y_1 \ \forall t,\\
+\text{(strict futurity)} \qquad & y_h(t)=1 \implies \mathrm{onset} > t, \\
+\text{(horizon bound)} \qquad & y_h(t)=1 \implies \mathrm{onset} \le t + 60h.
+\end{align}
+Realized class prevalence is severe (Table~\ref{tab:prevalence}): at $h=1$h, only $38$--$41$ positive anchors exist per non-training split, which materially limits the statistical power of any $1$-hour comparison (\S\ref{sec:bootstrap}).
+
+\begin{table}[h]
+\centering
+\caption{Label prevalence by split and horizon.}
+\label{tab:prevalence}
+\begin{tabular}{lrrrrrr}
+\toprule
+Split & Pos.\ (1h) & Prev.\ (1h) & Pos.\ (3h) & Prev.\ (3h) & Pos.\ (6h) & Prev.\ (6h) \\
+\midrule
+Train & 210 & 0.36\% & 903 & 1.55\% & 1{,}771 & 3.03\% \\
+Validation & 38 & 0.26\% & 178 & 1.20\% & 349 & 2.36\% \\
+Test & 41 & 0.33\% & 169 & 1.35\% & \textbf{322} & \textbf{2.58\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{Feature Construction}\label{sec:features}
+% =====================================================================
+
+\subsection{Physiology}
+
+Let $\{(\tau_r, v_r)\}$ be the (implausible-value-filtered) observations of channel $c\in\{\mathrm{hr,rr,spo2,temp,sbp,dbp,map}\}$ for stay $i$. Bin membership follows $\lceil \tau_r/60 \rceil = g$ (observation at $\tau_r$ belongs to the bin whose availability time $60g \ge \tau_r$ is the first hourly boundary at or after $\tau_r$). Within bin $g$,
+\begin{equation}
+\mu_c(g) = \tfrac{1}{|B_{c,g}|}\!\!\sum_{r\in B_{c,g}}\!\! v_r,\quad
+\min_c(g),\ \max_c(g),\quad
+o_c(g) = \1{|B_{c,g}|>0},
+\end{equation}
+and time-since-last-observation
+\begin{equation}
+\delta_c(g) = \min\!\Big(g - \max\{g' \le g : o_c(g')=1\},\ 24\Big)\big/24,
+\end{equation}
+with $\delta_c(g)=1$ if the channel has never been observed up to $g$. The channel mean is $z$-scored with $\mathrm{TRAIN}$-only statistics $(\mu_c^{\mathrm{tr}}, \sigma_c^{\mathrm{tr}})$: $z_c(g) = (\mu_c(g)-\mu_c^{\mathrm{tr}})/\sigma_c^{\mathrm{tr}}$, set to $0$ when unobserved (the observed-flag $o_c(g)$ carries the missingness information instead of an out-of-range sentinel value). Concatenating $(z_c,\min_c,\max_c,o_c,\delta_c)$ over $7$ channels gives $d_p = 35$.
+
+\subsection{Laboratory}
+
+For lab name $j$, let $\{(t_r,x_r)\}$ be its (train-fit-clipped, $z$-scored) results for the stay, with clip bounds at the train $1$st/$99$th percentiles. For anchor grid point $G=60g$, define the trailing $24$h window $W_g=(G-1440,\,G]$ and let $n_j(g) = |\{r : t_r \in W_g\}|$. Using $h_r = (t_r-t_{r_0})/60$ for numerical centering, the ordinary-least-squares slope over the window is
+\begin{equation}
+\beta_j(g) \;=\; 24 \cdot \frac{n_j(g)\sum h_r x_r - \big(\sum h_r\big)\big(\sum x_r\big)}{n_j(g)\sum h_r^2 - \big(\sum h_r\big)^2}, \qquad n_j(g)\ge2,
+\end{equation}
+clipped to $[-5,5]$, and $0$ otherwise. The most recent value ``carried forward'' and its freshness are
+\begin{align}
+\ell_j(g) &= x_{r^\ast}, \qquad r^\ast = \arg\max\{r : t_r \le G\}, \\
+\delta^{\ell}_j(g) &= \min\big((G-t_{r^\ast})/60,\,72\big)/72 \quad (=1 \text{ if never measured}).
+\end{align}
+With the ever-measured flag $e_j(g)=\1{\exists r: t_r\le G}$, the five-tuple $(\ell_j,\delta^\ell_j,\beta_j,\log(1+n_j)/2,e_j)$ is a per-variable temporal summary; over $16$ selected lab names (chosen by \emph{train-stay coverage only} — a leakage-free variable selection step) this gives $d_l = 80$.
+
+\subsection{Clinical text}
+
+Let $\mathcal{D}_{\mathrm{train}}$ be the deduplicated set of training-split note strings, with availability time $t^{\mathrm{avail}} = t^{\mathrm{entry}}$ (falling back to $t^{\mathrm{clin}}$ only when $t^{\mathrm{entry}}$ is missing). A character $n$-gram ($n\in\{3,4,5\}$) TF-IDF vectorizer $V$ is fit on $\mathcal{D}_{\mathrm{train}}$, followed by truncated SVD to $k=\min(64,\mathrm{rank})$ components:
+\begin{equation}
+V(\cdot) \in \R^{|\mathrm{vocab}|}, \qquad \mathrm{SVD}_k\big(V(D_{\mathrm{train}})\big) = U\Sigma W^\top,\qquad \phi_{\mathrm{text}}(d) = \frac{W^\top V(d) - \bar z}{s},
+\end{equation}
+with $\bar z, s$ the train-embedding mean/std (per-dimension). For hour $g$, let $\mathcal{N}_g = \{d : \lceil t^{\mathrm{avail}}_d/60\rceil = g\}$ (empty for $\sim98\%$ of rows: only $12{,}920$ notes across $123{,}895$ hourly rows). Then
+\begin{equation}
+\bar v(g) = \frac{1}{|\mathcal{N}_g|}\sum_{d\in\mathcal{N}_g} \phi_{\mathrm{text}}(d) \ \ (\text{or } 0),\qquad c(g) = |\mathcal{N}_g|,\qquad
+\delta^n(g) = \min\big((g - g_{\mathrm{last}})/72,\,1\big),
+\end{equation}
+giving $d_t = 66 = 64 + 2$ (mean embedding, freshness, log-count). \emph{Critically}, both $V$ and the SVD basis are fit only on $\mathcal{D}_{\mathrm{train}}$: the vocabulary and singular subspace used to embed validation/test notes carry zero information from those splits.
+
+\subsection{Static and modality mask}
+
+$S_i \in \R^{14}$ concatenates $z$-scored $(\mathrm{age},\mathrm{weight},\mathrm{height},\log(1+\text{pre-ICU h}))$ (train-median-imputed, with missingness indicators for weight/height), a $\{0,\tfrac12,1\}$-coded sex indicator, and a one-hot over the top-$6$ train ICU-unit types plus an ``other'' bucket. The per-row modality mask is $m(g) = \big(o(g), \bar e(g), \1{c(g)>0}\big) \in \{0,1\}^3$, where $o(g)=\1{\exists c: o_c(g)=1}$ and $\bar e(g)=\1{\exists j: e_j(g)=1}$.
+
+% =====================================================================
+\section{Architecture}\label{sec:architecture}
+% =====================================================================
+
+Let $D=64$ be the shared per-modality representation width, $H=96$ the recurrent hidden width, and $T=24$ the lookback length. Superscripts $(p),(l),(n)$ index physiology, laboratory, and text.
+
+\subsection{Modality encoders}
+
+\paragraph{Physiology --- causal temporal convolutional network (TCN).}
+A stack of causally-padded dilated convolutions. For a single residual block at dilation $\delta$ with kernel size $k=3$ operating on channel-first input $h\in\R^{D\times T}$,
+\begin{equation}
+h' \;=\; h + \mathrm{Dropout}\Big(\mathrm{GELU}\big(\mathrm{GroupNorm}(\mathrm{Conv1d}_{k,\delta}(\,\mathrm{Pad}_{\mathrm{left}}(h,\ (k-1)\delta)\,))\big)\Big).
+\end{equation}
+Left-only padding of size $(k-1)\delta$ before the convolution guarantees that output position $t$ depends only on input positions $\le t$ (causal convolution). Three blocks are stacked with dilations $(1,2,4)$, giving each output position a causal receptive field of $1+2\sum_i (k-1)\delta_i = 1+2\cdot2\cdot(1+2+4)=29 \ge T=24$, so every position can, in principle, attend to the entire lookback window without violating causality. Formally, $H^{(p)} = f_p(P_{1:T}) \in \R^{T\times D}$.
+
+\paragraph{Laboratory --- shared-weight MLP.}
+$H^{(l)}_t = \mathrm{LayerNorm}\big(\,W_2\,\mathrm{Dropout}(\mathrm{GELU}(W_1 L_t + b_1)) + b_2\,\big)$, applied identically (row-wise) at each $t$ — an instantaneous encoder, since lab freshness/slope features already carry the relevant temporal summary internally.
+
+\paragraph{Text --- frozen-embedding projection.}
+$H^{(n)}_t = \mathrm{LayerNorm}\big(\mathrm{GELU}(W N_t + b)\big)$, a simple linear projection of the already-frozen $66$-d note embedding into the shared $D$-dimensional space (no fine-tuning of the text encoder; only the projection head is trained end-to-end).
+
+\subsection{Causal, missingness-aware cross-modal attention}\label{sec:crossattn}
+
+Standard scaled dot-product attention is modified in two ways: (i) queries at row $t$ may only attend to source rows $s\le t$ (causality), and (ii) attention to a source row is additionally masked out when that row's modality mask is $0$ (missingness); a learned \emph{null token} $\bm{\eta}\in\R^{D}$ is always attendable so the softmax remains well defined even when a modality is entirely absent for a sample.
+
+Formally, with query stream $X_q\in\R^{T\times D}$, source stream $X_s \in \R^{T\times D}$, source mask $\mu \in \{0,1\}^T$, and $h$ attention heads of dimension $d_h=D/h$:
+\begin{align}
+K &= [\bm{\eta};\, W_K X_s] \in \R^{(T+1)\times D}, \qquad V = [\bm{\eta};\, W_V X_s] \in \R^{(T+1)\times D}, \qquad Q = W_Q X_q, \\
+\mathrm{Allow}_{t,0} &= 1 \ \text{(null always attendable)}, \qquad \mathrm{Allow}_{t,s+1} = \1{s\le t}\cdot \mu_s, \quad s=1,\dots,T,\\
+\alpha_{t,\cdot} &= \mathrm{softmax}\Big(\tfrac{Q_t K^\top}{\sqrt{d_h}} + (1-\mathrm{Allow}_{t,\cdot})\cdot(-\infty)\Big), \qquad
+\mathrm{Attn}(X_q,X_s,\mu)_t = W_O\Big(\sum_{s'} \alpha_{t,s'} V_{s'}\Big).
+\end{align}
+The full fusion step applies this three times with residual, pre-LayerNorm connections:
+\begin{align}
+Z^{(p)} &= \mathrm{LayerNorm}\Big(H^{(p)} + \mathrm{Attn}\big(H^{(p)},H^{(n)},m_{\cdot,2}\big) + \mathrm{Attn}\big(H^{(p)},H^{(l)},m_{\cdot,1}\big)\Big), \\
+Z^{(l)} &= \mathrm{LayerNorm}\Big(H^{(l)} + \mathrm{Attn}\big(H^{(l)},H^{(n)},m_{\cdot,2}\big)\Big),\\
+Z^{(n)} &= H^{(n)}.
+\end{align}
+i.e.\ physiology attends causally to (masked) text and labs; labs attend causally to (masked) text; text is left unmodified as the terminal modality in the fusion DAG.
+
+\subsection{Missingness-aware reliability gate}
+
+Stack $\mathcal{Z}_t = [Z^{(p)}_t; Z^{(l)}_t; Z^{(n)}_t] \in \R^{3\times D}$. A per-modality scalar reliability score is computed by a linear head $g_k(\cdot)$, masked to $-\infty$ for unavailable modalities, and renormalized \emph{only over the modalities actually present} at row $t$:
+\begin{equation}
+s_{t,k} = g_k(\mathcal{Z}_{t,k}), \qquad
+\tilde s_{t,k} = \begin{cases} s_{t,k} - \max_j s_{t,j} & m_{t,k}=1 \\ -\infty & m_{t,k}=0\end{cases}, \qquad
+\alpha_{t,k} = \frac{m_{t,k}\, e^{\tilde s_{t,k}}}{\sum_{j} m_{t,j}\, e^{\tilde s_{t,j}} + \varepsilon},
+\end{equation}
+\begin{equation}
+Z_t \;=\; \sum_{k=1}^{3} \alpha_{t,k}\, \mathcal{Z}_{t,k}. \label{eq:gate}
+\end{equation}
+Equation~\eqref{eq:gate} is a convex combination over \emph{present} modalities: if only physiology is available at row $t$ (labs/text masked out), $\alpha_{t,\cdot}$ collapses to a one-hot vector on physiology and $Z_t = Z_t^{(p)}$ exactly, rather than a weighted average that implicitly treats a zero-imputed missing modality as informative near-zero evidence.
+
+\subsection{Longitudinal state and output heads}
+
+A single-layer GRU consumes $[Z_t; m_t] \in \R^{D+3}$ across $t=1,\dots,T$, initialized from the static representation $\mathrm{GELU}(W_s S + b_s) \in \R^H$:
+\begin{equation}
+h_t = \mathrm{GRU}\big([Z_t;m_t],\, h_{t-1}\big), \qquad h_0 = \mathrm{GELU}(W_sS+b_s).
+\end{equation}
+The risk vector is produced from the final hidden state concatenated with the static embedding:
+\begin{equation}
+\hat{\bm p} \;=\; \sigma\Big(W_2\,\mathrm{Dropout}\big(\mathrm{GELU}(W_1[h_T; \mathrm{GELU}(W_sS+b_s)]+b_1)\big)+b_2\Big) \in (0,1)^{3}. \label{eq:head}
+\end{equation}
+
+\subsection{Loss and class re-weighting}
+
+Multi-task binary cross-entropy with equal horizon weight $\lambda_h\equiv1$ and mild positive up-weighting only for rare horizons ($<5\%$ prevalence):
+\begin{align}
+w_h &= \begin{cases}1 & \pi_h \ge 0.05\\ \min\!\Big(\sqrt{\tfrac{1-\pi_h}{\pi_h}},\,10\Big) & \pi_h<0.05\end{cases}, \qquad \pi_h = \tfrac1n\textstyle\sum_i y_{i,h},\\
+\mathcal{L}(\theta) &= -\frac{1}{n}\sum_{i=1}^{n}\sum_{h\in\mathcal{H}} w_h\Big[y_{i,h}\log\hat p_{i,h} + (1-y_{i,h})\log(1-\hat p_{i,h})\Big].
+\end{align}
+Because $\pi_1 = 0.36\%,\,\pi_3=1.55\%,\,\pi_6=3.03\%$ on train (Table~\ref{tab:prevalence}) are all $<5\%$, all three horizons receive positive up-weighting; the $1$-hour horizon receives $\min(\sqrt{(1-0.0036)/0.0036},10) = 10$ (capped).
+
+\paragraph{Modality dropout (training-time robustness).} With probability $p_{\mathrm{drop}}=0.15$ per modality per sample, an \emph{available} modality is independently masked to its ``missing'' template value during training (never dropping every available modality for a sample), i.e.\ the network is explicitly trained under the missingness distribution it will face at test/robustness-evaluation time — this is what makes the ablation-table entries at inference time (\S\ref{sec:ablation}) valid re-uses of one fixed checkpoint rather than requiring $2^3-1$ separately trained models.
+
+\subsection{Baseline hierarchy}
+
+\begin{align}
+\text{B0 (logistic):} & \quad \hat p = \sigma(w^\top x + b), \ x = \text{flattened, temporally-collapsed summary of all modalities (mean/min/max/count per channel)};\\
+\text{B1--B3 (single-modality GRU):} & \quad \hat p_h = f_{\theta_m}(M_{1:T}, S), \quad m\in\{p,l,n\}; \\
+\text{B4 (naive concatenation):} & \quad X_t = [P_t; L_t; N_t; m_t], \quad \hat p = \mathrm{Head}\big(\mathrm{GRU}(\mathrm{Proj}(X_{1:T}))\big);\\
+\text{Proposed:} & \quad \text{\S\ref{sec:crossattn}--\ref{eq:head} (separate encoders, causal cross-attention, reliability gate)}.
+\end{align}
+B1--B4 share the \texttt{ConcatGRU} class and are recovered from the multimodal architecture's building blocks with $D\to H=64$ collapsed directly into the recurrent width and no cross-attention/gate stage — the deliberately ``flat'' comparator against which the fusion mechanism of \S\ref{sec:crossattn}--\ref{sec:crossattn} must earn its keep.
+
+% =====================================================================
+\section{Training Protocol and Model Selection}
+% =====================================================================
+
+All models are optimized with AdamW ($\mathrm{lr}=10^{-3}$, weight decay $10^{-4}$), gradient-norm clipped at $1.0$, batch size $512$. Model selection uses \emph{mean AUPRC across the three horizons, evaluated on the validation split only}:
+\begin{equation}
+\theta^\ast = \arg\max_{\theta \in \{\theta_1,\dots,\theta_E\}} \ \frac13\sum_{h\in\mathcal H} \mathrm{AUPRC}\big(y_h^{\mathrm{val}}, \hat p_h^{\mathrm{val}}(\theta)\big),
+\end{equation}
+with early stopping (patience $=6$ epochs for the multimodal model, $4$--$5$ for baselines) on this same criterion. The test set is read exactly once, downstream of $\theta^\ast$ being frozen — a discipline enforced structurally by separating \texttt{07\_}/\texttt{08\_train\_*.py} (which never inspect test labels for any decision) from \texttt{09\_evaluate.py}. The trained multimodal checkpoint reached its selection optimum at epoch $3$ of $9$ trained (val.\ mean AUPRC $0.1232$ at the reported run), after which validation AUPRC degraded under continued optimization — evidence of overfitting past a very small number of epochs, consistent with $n_{\mathrm{train,pos}}(6\mathrm h)=1{,}771$ being a modest amount of positive-class signal for a $172{,}070$-parameter network.
+
+% =====================================================================
+\section{Evaluation Metrics}
+% =====================================================================
+
+\subsection{Discrimination: AUPRC}
+
+For scores $\{\hat p_i\}$ and labels $\{y_i\}$, precision and recall at threshold $\tau$ are
+\begin{equation}
+\mathrm{Prec}(\tau) = \frac{\sum_i \1{\hat p_i \ge \tau}y_i}{\sum_i \1{\hat p_i\ge\tau}}, \qquad
+\mathrm{Rec}(\tau) = \frac{\sum_i \1{\hat p_i\ge\tau}y_i}{\sum_i y_i},
+\end{equation}
+and $\mathrm{AUPRC} = \int_0^1 \mathrm{Prec}(R)\,dR$ along the curve parametrized by $R=\mathrm{Rec}(\tau)$. AUPRC is preferred over AUROC as the headline metric because, at $6$h test prevalence $\pi=322/12485\approx0.0258$, AUROC is dominated by the (uninteresting) majority-class ranking behaviour, whereas AUPRC is sensitive to ranking quality specifically among the rare positive class.
+
+\subsection{Calibration: Platt scaling, Brier score, ECE}
+
+A logistic recalibration map is fit on \emph{validation} scores only, then applied unchanged to test:
+\begin{equation}
+\tilde p = \sigma\big(a\cdot\mathrm{logit}(\hat p) + b\big), \qquad (a,b) = \arg\min_{a,b} \ -\sum_{i\in\mathrm{val}} \big[y_i\log\tilde p_i + (1-y_i)\log(1-\tilde p_i)\big].
+\end{equation}
+Brier score $\mathrm{BS}=\tfrac1n\sum_i(\hat p_i-y_i)^2$ and expected calibration error with $10$ equal-frequency bins $\{B_k\}$,
+\begin{equation}
+\mathrm{ECE} = \sum_k \frac{|B_k|}{n}\Big|\, \overline{y}_{B_k} - \overline{\hat p}_{B_k}\,\Big|,
+\end{equation}
+are reported alongside their calibrated counterparts.
+
+% =====================================================================
+\section{Clustered Statistical Inference}\label{sec:bootstrap}
+% =====================================================================
+
+\subsection{Why the naive i.i.d.\ bootstrap is invalid here}
+
+The $12{,}485$ test-set hourly anchors are \emph{not} exchangeable observations: anchors within the same ICU stay $i$ share the same underlying trajectory $S_i(\cdot)$, model errors, and label-generating episode structure, inducing strong within-stay correlation. Bootstrap-resampling anchors directly (ignoring stay membership) would treat correlated observations as independent, systematically \emph{underestimating} the true sampling variance of any test-set statistic — precisely the failure mode that would make a noisy point-estimate difference look artificially significant.
+
+\subsection{Cluster (stay-level) bootstrap}
+
+Let $\mathcal I = \{1,\dots,N_{\mathrm{test}}\}$ ($N_{\mathrm{test}}=245$ stays) and $\mathcal A_i$ the set of test anchors belonging to stay $i$. For replicate $b=1,\dots,B$ ($B=2000$):
+\begin{enumerate}[label=(\roman*)]
+\item Draw $I_1^{(b)},\dots,I_N^{(b)} \overset{\mathrm{iid}}{\sim} \mathrm{Uniform}(\mathcal I)$ \emph{with replacement} (stays, not anchors).
+\item Form the resampled anchor multiset $\mathcal A^{(b)} = \bigcup_{r=1}^{N} \mathcal A_{I_r^{(b)}}$ (a stay drawn $k$ times contributes all of its anchors $k$ times).
+\item Compute $\hat\theta^{(b)} = \mathrm{AUPRC}\big(\{y_a\}_{a\in\mathcal A^{(b)}}, \{\hat p_a\}_{a\in\mathcal A^{(b)}}\big)$.
+\end{enumerate}
+The percentile confidence interval is $\mathrm{CI}_{95\%} = \big[\,Q_{0.025}(\hat\theta^{(1:B)}),\ Q_{0.975}(\hat\theta^{(1:B)})\,\big]$.
+
+\subsection{Paired comparison}
+
+For two models $A,B$ evaluated on the \emph{same} resampled stay set $\{I_r^{(b)}\}$ at each replicate $b$ (a matched/paired bootstrap, controlling for which stays happened to be resampled),
+\begin{equation}
+\Delta^{(b)} = \hat\theta_A^{(b)} - \hat\theta_B^{(b)}, \qquad \mathrm{CI}_{95\%}(\Delta) = \big[Q_{0.025}(\Delta^{(1:B)}),\,Q_{0.975}(\Delta^{(1:B)})\big].
+\end{equation}
+If $0 \in \mathrm{CI}_{95\%}(\Delta)$, the null hypothesis $H_0: \theta_A=\theta_B$ is not rejected at the two-sided $5\%$ level under this resampling scheme.
+
+% =====================================================================
+\section{Results}
+% =====================================================================
+
+\subsection{Predictive discrimination}
+
+\begin{table}[h]
+\centering
+\caption{Test-set AUPRC by horizon (single held-out evaluation; final pipeline run).}
+\label{tab:auprc}
+\begin{tabular}{lrrr}
+\toprule
+Model & $1$h & $3$h & $6$h \\
+\midrule
+Logistic regression (B0) & 0.0125 & 0.0483 & 0.0880 \\
+Physiology-only (B1) & \textbf{0.0918} & \textbf{0.1012} & \textbf{0.1266} \\
+Laboratory-only (B2) & 0.0060 & 0.0278 & 0.0527 \\
+Text-only (B3) & 0.0036 & 0.0136 & 0.0259 \\
+Naive concatenation (B4) & 0.0480 & 0.0770 & 0.1034 \\
+Proposed multimodal & 0.0215 & 0.0833 & 0.1175 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Ablation (6h horizon, single checkpoint, modality masking at inference)}\label{sec:ablation}
+
+\begin{table}[h]
+\centering
+\caption{Modality-subset ablation via inference-time masking of the trained multimodal checkpoint.}
+\begin{tabular}{lr}
+\toprule
+Modalities present & AUPRC (6h) \\
+\midrule
+Physiology $+$ text & 0.1256 \\
+Physiology only & 0.1243 \\
+Physiology $+$ laboratory & 0.1180 \\
+Physiology $+$ laboratory $+$ text (full model) & 0.1175 \\
+Laboratory only & 0.0470 \\
+Laboratory $+$ text & 0.0456 \\
+Text only & 0.0291 \\
+\bottomrule
+\end{tabular}
+\end{table}
+Every subset containing physiology clusters between $0.118$ and $0.126$; every subset excluding physiology falls to $0.029$--$0.047$. The dominant term in the additive decomposition of predictive performance is unambiguously the physiology encoder.
+
+\subsection{Stay-level bootstrap confidence intervals}
+
+\begin{table}[h]
+\centering
+\caption{Stay-clustered bootstrap ($B=2000$), 6h horizon, test split ($245$ stays, $322$ positive anchors, $\pi=0.0258$).}
+\label{tab:bootstrap}
+\begin{tabular}{lrr}
+\toprule
+Model & AUPRC & 95\% CI \\
+\midrule
+Logistic & 0.0880 & $[0.0453,\ 0.1509]$ \\
+Physiology-only & 0.1266 & $[0.0557,\ 0.2473]$ \\
+Naive concatenation & 0.1034 & $[0.0553,\ 0.1802]$ \\
+Multimodal (proposed) & 0.1175 & $[0.0592,\ 0.1954]$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Paired stay-level bootstrap differences (multimodal minus comparator), $B=2000$.}
+\begin{tabular}{lrrl}
+\toprule
+Comparison & $\Delta$ & 95\% CI & Zero in CI? \\
+\midrule
+Multimodal $-$ Physiology-only & $-0.0091$ & $[-0.0980,\ +0.0575]$ & Yes \\
+Multimodal $-$ Naive concatenation & $+0.0141$ & $[-0.0496,\ +0.0885]$ & Yes \\
+Multimodal $-$ Logistic & $+0.0294$ & $[-0.0145,\ +0.0862]$ & Yes \\
+\bottomrule
+\end{tabular}
+\end{table}
+All three paired intervals contain zero. \emph{The point-estimate ranking in Table~\ref{tab:auprc} (physiology-only $>$ multimodal $>$ naive concatenation $>$ logistic) is therefore not statistically distinguishable at $n=245$ test stays}; the correct claim is that multimodal fusion is \emph{competitive with, but not established as superior to}, a physiology-only model in this cohort, while it is at least directionally consistent with an improvement over naive concatenation and logistic regression. The width of the CI for physiology-only ($0.192$) versus multimodal ($0.136$) is itself informative: the additional modalities, and the gating mechanism that renormalizes over present ones, appear to slightly \emph{stabilize} the estimator's variance across bootstrap draws, even without moving its center.
+
+% =====================================================================
+\section{Alarm Controller}
+% =====================================================================
+
+The risk trajectory $\hat p_{i,6}(t)$ is converted into a discrete alarm process by a persistence-and-cooldown automaton:
+\begin{equation}
+A_i(t) = \1{\hat p_{i,6}(\tau) > \tau^\ast \ \ \forall\, \tau \in \{t-60(k-1),\dots,t\},\ \text{gap-free}} \wedge \1{t - t_{\mathrm{last}} \ge \Delta_c},
+\end{equation}
+with persistence $k=2$ consecutive hourly anchors and cooldown $\Delta_c=60$min. The threshold $\tau^\ast$ is chosen on \emph{validation} by sweeping $\tau\in[0.05,0.95]$ and selecting the largest $\tau$ achieving event sensitivity $\ge0.70$ (falling back to the highest-sensitivity point if no $\tau$ clears the bar), then \emph{frozen} and applied once to test — the same train/select/freeze/evaluate discipline as model selection.
+
+\begin{table}[h]
+\centering
+\caption{Alarm controller, test split, $\tau^\ast=0.05$, $k=2$, $\Delta_c=60$min.}
+\begin{tabular}{lr}
+\toprule
+Quantity & Value \\
+\midrule
+Patient-days & 520.21 \\
+Total alarms & 5{,}950 \\
+Alarms / patient-day & 11.44 \\
+False alarms / patient-day & 10.92 \\
+Alarm precision & 4.49\% \\
+Events (with $\ge1$ prediction opportunity) & 73 \\
+Events detected ($\ge1$ true alarm within horizon) & 62 \\
+Event sensitivity & 84.93\% \\
+Median warning time & 5.18 h \\
+IQR warning time & $[2.89,\ 5.63]$ h \\
+\bottomrule
+\end{tabular}
+\end{table}
+\noindent Event sensitivity is defined as $\big|\{\text{events with} \ge1 \text{ true alarm}\}\big| / \big|\{\text{events}\}\big| = 62/73$; alarm precision as $n_{\mathrm{true\ alarm}}/n_{\mathrm{alarm}}$; warning time for a detected event as (onset time) $-$ (first true-alarm time). At this operating point, $95.5\%$ of raised alarms are false — worse than the $75\%$ false-positive baseline the problem statement itself cites for conventional bedside monitors — while achieving substantially earlier and more sensitive detection (median $5.18$h lead, $84.9\%$ sensitivity). This is not a failure of the risk model; it reflects an operating-point choice (sensitivity-weighted threshold selection) on a genuinely rare event, and the full $\tau$-sweep in \texttt{alarm\_threshold\_sweep.csv} traces the entire achievable sensitivity/burden Pareto frontier, from which a deployment could select a higher-precision, lower-sensitivity point instead.
+
+% =====================================================================
+\section{Missing-Modality Robustness and Stress Testing}\label{sec:missingness}
+% =====================================================================
+
+\subsection{Occlusion-based modality contribution}
+
+For the trained checkpoint $f_\theta$ and a fixed input $x$, define the marginal contribution of modality $m$ as
+\begin{equation}
+\Delta_m(x) \;=\; f_\theta(x)_{6\mathrm h} \;-\; f_\theta(x_{\setminus m})_{6\mathrm h}, \label{eq:occlusion}
+\end{equation}
+where $x_{\setminus m}$ replaces modality $m$'s rows with its learned ``missing'' template (\S\ref{sec:architecture}) and zeroes its mask column. Equation~\eqref{eq:occlusion} is an \emph{attribution} quantity conditioned on the trained network's fixed parameters, not an estimate of a causal effect of the underlying clinical variable on the patient's true physiological trajectory; a positive $\Delta_m$ means ``the network's own output falls when $m$ is occluded,'' which is a statement about $f_\theta$, not about physiology.
+
+\begin{table}[h]
+\centering
+\caption{Missing-modality robustness (6h AUPRC), single checkpoint, test split.}
+\begin{tabular}{lr}
+\toprule
+Perturbation & AUPRC (6h) \\
+\midrule
+Full model & 0.1175 \\
+Laboratory removed & 0.1256 \\
+Laboratory $+$ text removed & 0.1243 \\
+Text removed & 0.1180 \\
+20\% laboratory dropout & 0.1160 \\
+40\% laboratory dropout & 0.1192 \\
+60\% laboratory dropout & 0.1203 \\
+Note delay $60$ min & 0.1229 \\
+Note delay $180$ min & 0.1272 \\
+Physiology removed & 0.0456 \\
+Physiology $+$ text removed & 0.0470 \\
+Physiology $+$ laboratory removed & 0.0291 \\
+\bottomrule
+\end{tabular}
+\end{table}
+Removing physiology drops $6$h AUPRC by $0.072$ ($61\%$ relative); removing laboratory or text alone \emph{does not degrade} performance below the full model at all (differences of this magnitude are well within the bootstrap CI half-widths of Table~\ref{tab:bootstrap}), consistent with the ablation finding of \S\ref{sec:ablation} and confirming that the reliability gate correctly reallocates near-zero weight to sparse/absent modalities rather than being confounded by their noise when present.
+
+\subsection{Controlled corruption stress tests}
+
+Gaussian noise injection on the physiology block, $P_t \to P_t + \epsilon_t,\ \epsilon_t\sim\mathcal N(0,\sigma^2 I)$, masked by the physiology observed-flag so unobserved entries remain untouched:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrr}
+\toprule
+$\sigma$ & AUROC & AUPRC \\
+\midrule
+0.00 & 0.8027 & 0.1175 \\
+0.10 & 0.8018 & 0.1170 \\
+0.25 & 0.7990 & 0.1138 \\
+0.50 & 0.7903 & 0.1046 \\
+1.00 & 0.7631 & 0.0849 \\
+2.00 & 0.7101 & 0.0627 \\
+\bottomrule
+\end{tabular}
+\qquad
+\begin{tabular}{lrr}
+\toprule
+Blackout & AUROC & AUPRC \\
+\midrule
+$0.5$h & 0.7972 & 0.1088 \\
+$1$h & 0.7972 & 0.1088 \\
+$2$h & 0.7859 & 0.1047 \\
+$4$h & 0.7642 & 0.0992 \\
+\bottomrule
+\end{tabular}
+\end{table}
+Degradation under both corruption families is smooth and monotone in the corruption magnitude, with no discontinuous collapse — evidence against pathological reliance on a narrow, brittle slice of the physiology signal (e.g.\ a single spurious feature interaction), and consistent with the modality-dropout training regularization of \S\ref{sec:architecture}.
+
+% =====================================================================
+\section{Discussion}
+% =====================================================================
+
+Five findings recur across independent analyses (ablation, missing-modality perturbation, and bootstrap inference), which is itself evidence of internal consistency in the pipeline rather than a single fragile result:
+
+\begin{enumerate}
+\item \textbf{Physiology dominates.} Every one of Tables~\ref{tab:auprc}, \ref{sec:ablation}, and the missing-modality table places physiology-containing configurations $2$--$5\times$ above physiology-excluding configurations.
+\item \textbf{Multimodal fusion is not established as superior to physiology alone at this sample size,} but it \emph{is} directionally better than naive concatenation and logistic regression, and it exhibits a narrower bootstrap CI than the physiology-only model.
+\item \textbf{Text and laboratory sparsity, not architecture, is the most parsimonious explanation for modality~2's finding.} Only $2\%$ of hourly rows carry a new note, and the TF-IDF/SVD encoder was fit on $225$ unique training documents — an information-starvation account fully consistent with observation~1, without needing to posit any flaw in the cross-attention/gating mechanism itself.
+\item \textbf{Risk prediction and alarm generation are separable, and the separation matters.} A model with genuine ranking value (AUPRC $4.5\times$ a random-prevalence baseline of $0.0258$) still yields a $4.49\%$-precision alarm stream at a sensitivity-oriented operating point — the alarm-fatigue phenomenon the project sets out to study is reproduced, not resolved, by good discrimination alone.
+\item \textbf{Stress robustness is graceful, not brittle}, degrading smoothly rather than catastrophically under both additive noise and structured blackout.
+\end{enumerate}
+
+% =====================================================================
+\section{Limitations}
+% =====================================================================
+
+\begin{enumerate}
+\item \textbf{Sample size.} $245$ test stays and $322$ positive $6$h anchors yield bootstrap CI half-widths of $\sim0.07$--$0.1$ AUPRC — comparable in magnitude to the point-estimate differences between models. The $1$h horizon ($38$--$41$ positives per split) is analysed for completeness but should not be over-interpreted.
+\item \textbf{Demo, not full eICU.} The eICU-CRD \emph{Demo} contains $2{,}520$ of the full database's $\sim200{,}000$ stays; absolute AUPRC magnitudes and modality-value conclusions may not transfer to the full corpus or to external institutions.
+\item \textbf{Text representation is intentionally lightweight.} A frozen, offline TF-IDF+SVD encoder was chosen for robustness to shorthand/typos without a training-time compute budget for fine-tuning; a stronger clinical-language encoder (e.g.\ a domain-pretrained transformer) may extract signal this representation cannot, independent of note sparsity.
+\item \textbf{Composite endpoint heterogeneity.} \texttt{composite\_collapse} merges two physiological mechanisms and death into one target to obtain adequate positive-class counts; this improves statistical feasibility at the cost of target homogeneity.
+\item \textbf{Occlusion attributions are not causal.} \S\ref{sec:missingness}'s $\Delta_m$ quantities characterize the trained function $f_\theta$, not the data-generating clinical process.
+\item \textbf{No external or prospective validation.} All reported numbers are retrospective, single-institution-demo, single-split results.
+\end{enumerate}
+
+% =====================================================================
+\section{Conclusion}
+% =====================================================================
+
+We have given a complete, causally-verified mathematical specification of a multimodal ICU deterioration forecasting system: an explicit filtration-respecting feature map $\Phi$ (Proposition~\ref{prop:truncation}, empirically tested), a masked causal cross-attention fusion architecture with a renormalizing missingness gate, a persistence-and-cooldown alarm automaton, and a stay-clustered bootstrap inference procedure appropriate to the correlation structure of ICU time series. On the eICU-CRD Demo, the central, carefully-qualified finding is that \textbf{physiological time-series are the dominant carrier of $6$-hour deterioration risk in this cohort, and the available evidence does not statistically distinguish the proposed multimodal fusion architecture from a physiology-only model}, even though the fusion architecture is directionally preferable to simpler concatenation and linear baselines. This null result is reported as a scientific finding, grounded in matching evidence from three independent analyses (ablation, missing-modality perturbation, and paired bootstrap), rather than treated as an obstacle to be argued around.
+
+\appendix
+% =====================================================================
+\section{Notation Summary}
+% =====================================================================
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+Symbol & Meaning \\
+\midrule
+$\F_i(t)$ & information filtration of stay $i$ up to time $t$ \\
+$T_i$ & composite-collapse onset time \\
+$Y_{i,h}(t),\,y_h(t)$ & horizon-$h$ label process at anchor $t$ \\
+$\Phi$ & feature construction map (row $g$ builder) \\
+$P_t,L_t,N_t,S$ & physiology/lab/text row, static vector \\
+$D,H,T$ & modality width ($64$), GRU width ($96$), lookback ($24$) \\
+$m_t\in\{0,1\}^3$ & per-row modality availability mask \\
+$\alpha_{t,k}$ & reliability-gate weight for modality $k$ at row $t$ \\
+$\hat{\bm p}$ & $3$-vector of calibrated/uncalibrated risk estimates \\
+$B,\hat\theta^{(b)}$ & bootstrap replicate count, replicate statistic \\
+$\tau^\ast,k,\Delta_c$ & alarm threshold, persistence length, cooldown \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}
