@@ -1,0 +1,2 @@
+patient_days,n_alarms,alarms_per_patient_day,false_alarms_per_patient_day,alarm_precision,n_events,events_detected,event_sensitivity,warning_h_median,warning_h_q25,warning_h_q75,tau,k,cooldown_min,model,split
+520.2083333333334,5950,11.437725270324389,10.924469363235882,0.044873949579831936,73,62,0.8493150684931506,5.183333333333334,2.8916666666666666,5.625,0.05,2,60.0,multimodal_all,test

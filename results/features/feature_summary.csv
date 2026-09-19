@@ -1,0 +1,39 @@
+block,feature,pct_rows_observed
+phys,hr,96.15
+phys,rr,83.33
+phys,spo2,89.04
+phys,temp,6.54
+phys,sbp,87.19
+phys,dbp,87.19
+phys,map,87.33
+lab,bun,86.62
+lab,sodium,86.99
+lab,creatinine,86.75
+lab,potassium,86.7
+lab,glucose,86.09
+lab,chloride,86.0
+lab,hct,85.04
+lab,wbc x 1000,84.16
+lab,calcium,84.61
+lab,hgb,84.47
+lab,platelets x 1000,82.98
+lab,rbc,82.11
+lab,bicarbonate,81.08
+lab,mcv,80.93
+lab,mchc,80.89
+lab,mch,78.82
+text,note_in_window,2.47
+static,age_num,
+static,admissionweight,
+static,admissionweight_missing,
+static,admissionheight,
+static,admissionheight_missing,
+static,pre_icu_h,
+static,male,
+static,unit=Med-Surg ICU,
+static,unit=MICU,
+static,unit=Cardiac ICU,
+static,unit=SICU,
+static,unit=CCU-CTICU,
+static,unit=Neuro ICU,
+static,unit=other,

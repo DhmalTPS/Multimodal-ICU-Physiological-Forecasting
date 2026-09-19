@@ -1,0 +1,32 @@
+{
+  "endpoint": "composite_collapse",
+  "definition": "first onset of: sustained hypotension (MAP<55 mmHg >= 30 min) OR sustained hypoxemia (SpO2<88% >= 30 min) OR ICU death",
+  "horizons_h": [
+    1,
+    3,
+    6
+  ],
+  "lookback_h": 24,
+  "grid_min": 60,
+  "merge_gap_min": 60,
+  "hypotension": {
+    "ch": "map",
+    "thr": 55.0,
+    "min_dur": 30,
+    "max_gap": 45
+  },
+  "hypoxemia": {
+    "ch": "spo2",
+    "thr": 88.0,
+    "min_dur": 30,
+    "max_gap": 20
+  },
+  "counts": {
+    "n_valid_anchors": 88061,
+    "pos_anchors_1h": 292,
+    "pos_anchors_3h": 1259,
+    "pos_anchors_6h": 2457,
+    "n_positive_stays_6h": 256
+  },
+  "rule": "anchors inside an ongoing episode are excluded; labels are event ONSETS in (t, t+H]"
+}

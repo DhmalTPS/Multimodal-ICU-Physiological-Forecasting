@@ -1,0 +1,9 @@
+table,required,found,opens,columns_ok,missing_columns,n_rows,size_mb,modified_since_last_run,matches_official_sha256,status
+patient,True,True,True,True,,2520,0.14,n/a,yes,OK
+vitalperiodic,True,True,True,True,,1634960,19.39,n/a,yes,OK
+vitalaperiodic,True,True,True,True,,274088,2.62,n/a,yes,OK
+lab,True,True,True,True,,434660,5.73,n/a,yes,OK
+note,True,True,True,True,,24758,0.27,n/a,yes,OK
+nursecharting,False,True,True,True,,1477163,16.84,n/a,yes,OK
+nurseassessment,False,True,True,True,,91589,1.1,n/a,yes,OK
+physicalexam,False,True,True,True,,84058,0.78,n/a,yes,OK

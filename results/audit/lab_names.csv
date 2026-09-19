@@ -1,0 +1,145 @@
+labname,n_results,n_stays
+BUN,14542,2375
+creatinine,14603,2373
+sodium,15414,2369
+Hct,14033,2368
+WBC x 1000,12677,2358
+glucose,14980,2353
+potassium,16335,2341
+Hgb,14387,2331
+chloride,14650,2328
+platelets x 1000,12691,2310
+calcium,14119,2297
+RBC,12559,2290
+MCV,12375,2261
+MCHC,12366,2260
+bicarbonate,13581,2214
+MCH,12093,2190
+RDW,11639,2157
+albumin,6430,1916
+-lymphs,8086,1882
+-monos,8049,1873
+anion gap,11544,1850
+AST (SGOT),5540,1847
+-eos,7560,1842
+ALT (SGPT),5481,1836
+total protein,5492,1831
+total bilirubin,5416,1827
+alkaline phos.,5462,1823
+-basos,7052,1739
+-polys,7311,1738
+magnesium,7138,1618
+MPV,8098,1497
+PT - INR,4060,1441
+bedside glucose,29900,1417
+PT,3897,1412
+urinary specific gravity,1253,996
+PTT,2585,995
+pH,3845,993
+phosphate,4161,991
+paCO2,3838,985
+FiO2,3237,984
+paO2,3854,984
+HCO3,3827,977
+O2 Sat (%),3284,851
+lactate,2018,839
+Base Excess,3225,823
+troponin - I,1919,710
+CPK,1329,645
+TSH,593,524
+triglycerides,552,427
+CPK-MB,882,414
+lipase,594,396
+BNP,583,388
+direct bilirubin,660,372
+-bands,1056,367
+Total CO2,1781,348
+HDL,359,341
+total cholesterol,371,340
+ionized calcium,1055,338
+Carboxyhemoglobin,1114,289
+PEEP,1182,282
+Vancomycin - trough,514,277
+Methemoglobin,1023,270
+Temperature,896,258
+LDL,260,246
+Respiratory Rate,655,223
+TV,800,222
+CPK-MB INDEX,442,209
+LPM O2,351,204
+Base Deficit,608,202
+O2 Content,684,172
+ammonia,350,172
+Fe,183,167
+free T4,170,162
+WBC's in urine,197,156
+Ferritin,168,155
+urinary sodium,190,154
+serum osmolality,609,152
+amylase,204,144
+fibrinogen,265,142
+Vitamin B12,148,141
+Vent Rate,427,137
+LDH,272,135
+TIBC,145,131
+prealbumin,250,123
+ESR,139,120
+Pressure Support,317,118
+Vancomycin - random,227,114
+Oxyhemoglobin,343,108
+troponin - T,291,108
+urinary creatinine,123,106
+Fe/TIBC Ratio,111,104
+folate,97,93
+CRP,193,92
+urinary osmolality,115,89
+uric acid,177,86
+ethanol,93,82
+cortisol,89,76
+Digoxin,97,76
+reticulocyte count,65,51
+salicylate,57,45
+Spontaneous Rate,96,39
+transferrin,42,38
+PTT ratio,79,31
+24 h urine protein,35,29
+myoglobin,51,28
+Acetaminophen,42,27
+Peak Airway/Pressure,80,27
+T4,25,25
+haptoglobin,28,25
+Phenytoin,47,22
+protein - CSF,20,20
+glucose - CSF,20,20
+T3,16,16
+Tacrolimus-FK506,96,15
+WBC's in body fluid,17,14
+WBC's in cerebrospinal fluid,16,14
+Pressure Control,24,9
+T3RU,7,7
+serum ketones,6,6
+prolactin,6,6
+Theophylline,7,6
+Device,23,6
+protein C,6,6
+cd 4,6,6
+CRP-hs,6,6
+WBC's in pleural fluid,6,5
+protein S,5,5
+Gentamicin - random,9,5
+Vent Other,16,5
+Lithium,12,4
+Gentamicin - trough,4,3
+Tobramycin - peak,3,3
+Phenobarbital,2,2
+Amikacin - trough,3,2
+Carbamazepine,2,2
+Tobramycin - trough,2,2
+Tobramycin - random,3,2
+Gentamicin - peak,3,1
+ANF/ANA,1,1
+24 h urine urea nitrogen,1,1
+WBC's in synovial fluid,1,1
+Amikacin - peak,1,1
+WBC's in peritoneal fluid,1,1
+Clostridium difficile toxin A+B,1,1

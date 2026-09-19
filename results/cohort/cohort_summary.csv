@@ -1,0 +1,8 @@
+step,n_stays,n_patients,excluded_vs_previous
+all ICU stays in patient table,2520,1841,0
+valid id + ICU discharge time,2520,1841,0
+ICU LOS > 24 h,1626,1332,894
+known ICU discharge status,1626,1332,0
+plausible hospital/ICU timeline,1622,1328,4
+>= 12 vital observations in first 24 h,1566,1294,56
+plausible event timing,1565,1294,1

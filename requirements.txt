@@ -1,0 +1,36 @@
+# ============================================================================
+# ICU Monitor Dilemma — pinned requirements for Python 3.11
+# Verified against manifests published for these exact versions; every
+# package below ships an official cp311 wheel (no source builds required).
+# Install with:  pip install -r requirements.txt
+# ============================================================================
+
+# ---- Core numerical / data stack ------------------------------------------
+numpy==1.26.4          # last 1.x line; cp311 wheels for win/linux/mac
+pandas==2.2.2          # requires numpy>=1.26 on py3.11 — matches pin above
+scipy==1.12.0          # transitive dep of scikit-learn; pinned explicitly
+                       # so its ABI is fixed against numpy==1.26.4
+
+# ---- Machine learning -------------------------------------------------------
+scikit-learn==1.4.2    # LogisticRegression, TruncatedSVD, PCA, TfidfVectorizer,
+                       # StandardScaler, Pipeline, roc_curve, PR-curve, AUROC/AUPRC
+joblib==1.3.2          # model persistence (logistic.joblib, text_encoder.joblib)
+
+# ---- Plotting ----------------------------------------------------------------
+matplotlib==3.8.4      # Agg backend used throughout 09_/10_/11_*.py
+
+# ============================================================================
+# PyTorch — install SEPARATELY, see the block below.
+# Do NOT just leave a bare "torch==2.2.2" line here: PyPI's plain index
+# resolves to different CUDA builds depending on OS/platform and silently
+# gives you a CPU-only wheel on some setups. Pick ONE command from below.
+# ============================================================================
+# torch==2.2.2         # <- placeholder; installed explicitly, see notes
+
+# ---- Optional: only needed if you run ----------------------------------------
+#   python 06_build_features.py --text-encoder hf:emilyalsentzer/Bio_ClinicalBERT
+# Skip this whole block if you keep the default --text-encoder tfidf.
+transformers==4.39.3
+tokenizers==0.15.2
+huggingface-hub==0.22.2
+safetensors==0.4.3
